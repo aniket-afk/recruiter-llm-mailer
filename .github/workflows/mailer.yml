@@ -2,120 +2,113 @@ name: Recruiter Mailer (daily 9am ET)
 
 on:
   schedule:
-    # 13:00 UTC = 9am ET (during DST), 14:00 UTC ≈ 9am ET (during Standard Time)
+    # 9:00 AM US Eastern ≈ 13:00 UTC during Daylight Saving
     - cron: "0 13 * * *"
-    - cron: "0 14 * * *"
-  workflow_dispatch: {}
-
-permissions:
-  contents: write
+  workflow_dispatch:
 
 jobs:
   send-mails:
     runs-on: ubuntu-latest
-    env:
-      # ---- App runtime config from repo secrets ----
-      SHEET_CSV_URL: ${{ secrets.SHEET_CSV_URL }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      SENDER_NAME: ${{ secrets.SENDER_NAME }}
-      SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
-      SMTP_HOST: ${{ secrets.SMTP_HOST }}
-      SMTP_PORT: ${{ secrets.SMTP_PORT }}
-      SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
-      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-      # Controls (tweak as you like)
-      MAX_PER_RUN: "100"
-      RATE_LIMIT_SECONDS: "8"
-      DRY_RUN: "false"
-      TEST_MODE: "false"
-      # For pushing the encrypted log back
-      GH_PAT: ${{ secrets.GH_PAT }}
-      # AGE keys for encrypt/decrypt (optional, but recommended)
-      AGE_PUBLIC_KEY: ${{ secrets.AGE_PUBLIC_KEY }}
-      AGE_PRIVATE_KEY: ${{ secrets.AGE_PRIVATE_KEY }}
+    timeout-minutes: 30
+
     steps:
-      - name: Check out repo
-      - uses: actions/checkout@v4
-
-      # Run only once at 9am America/New_York even though we schedule twice daily.
-      - name: Guard to run only at 9am ET
-        id: guard
-        run: |
-          tz="America/New_York"
-          now_local=$(TZ=$tz date +%H)
-          if [ "$now_local" != "09" ]; then
-            echo "not_9am=true" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Stop if not 9am ET
-        if: steps.guard.outputs.not_9am == 'true'
-        run: echo "Skipping because it's not 9am ET on this runner"; exit 0
+      - name: Checkout
+      # we disable default token so we can push with GH_PAT later
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Install system deps (age for encryption)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y age
-
-      - name: Install Python deps
+      - name: Install deps
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # Optional: fetch resume from a URL secret and save it so it's attached
-      - name: Download resume (optional)
-        if: ${{ secrets.RESUME_URL != '' }}
-        run: |
-          curl -fsSL "$RESUME_URL" -o Resume_Aniket_Patole.pdf || echo "No resume URL or download failed"
+      - name: (Optional) Download resume from RESUME_URL
         env:
           RESUME_URL: ${{ secrets.RESUME_URL }}
-
-      - name: Decrypt sent_log (if keys + file exist)
         run: |
-          if [ -n "$AGE_PRIVATE_KEY" ] && [ -f "sent_log.enc" ]; then
-            mkdir -p ~/.age
-            printf "%s\n" "$AGE_PRIVATE_KEY" > ~/.age/key.txt
-            chmod 600 ~/.age/key.txt
-            if ! age --decrypt -i ~/.age/key.txt -o sent_log.json sent_log.enc; then
-              echo '{}' > sent_log.json
-            fi
+          if [ -n "$RESUME_URL" ]; then
+            echo "Downloading resume from $RESUME_URL"
+            curl -fsSL "$RESUME_URL" -o Resume_Aniket_Patole.pdf
+            ls -lh Resume_Aniket_Patole.pdf || true
           else
-            # start with empty log if none
-            if [ ! -f sent_log.json ]; then
-              echo '{}' > sent_log.json
-            fi
+            echo "No RESUME_URL secret set; skipping resume download."
           fi
 
       - name: Run mailer
+        env:
+          # LLM / OpenAI
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+          # Sheet
+          SHEET_CSV_URL: ${{ secrets.SHEET_CSV_URL }}
+
+          # Sender identity
+          SENDER_NAME: "Aniket Patole"
+          SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
+
+          # Gmail SMTP (App Password)
+          SMTP_HOST: smtp.gmail.com
+          SMTP_PORT: "465"
+          SMTP_USERNAME: ${{ secrets.SENDER_EMAIL }}
+          SMTP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+
+          # Controls
+          MAX_PER_RUN: "100"
+          RATE_LIMIT_SECONDS: "8"
+          DRY_RUN: "false"
+          TEST_MODE: "false"
+
+          # Optional: List-Unsubscribe header
+          LIST_UNSUBSCRIBE_MAILTO: ${{ secrets.SENDER_EMAIL }}
         run: |
           python mailer.py
 
-      - name: Re-encrypt sent_log
+      - name: Encrypt sent_log.json
+        # Use bash test instead of expression to avoid 'secrets' parsing issues
+        env:
+          PUBLIC_AGE_KEY: ${{ secrets.PUBLIC_AGE_KEY }}
         run: |
-          if [ -n "$AGE_PUBLIC_KEY" ]; then
-            age --encrypt -r "$AGE_PUBLIC_KEY" -o sent_log.enc sent_log.json
+          if [ -f sent_log.json ]; then
+            if [ -z "$PUBLIC_AGE_KEY" ]; then
+              echo "PUBLIC_AGE_KEY not set; skipping encryption."
+              exit 0
+            fi
+            sudo apt-get update -y
+            sudo apt-get install -y age
+            echo "$PUBLIC_AGE_KEY" > pubkey.txt
+            age -r "$(cat pubkey.txt)" -o sent_log.enc sent_log.json
+            rm -f pubkey.txt
+            ls -lh sent_log.enc
           else
-            echo "AGE_PUBLIC_KEY missing; keeping plaintext sent_log.json only in this runner (will not push)."
+            echo "sent_log.json not found; nothing to encrypt."
           fi
 
       - name: Commit & push encrypted log
-        if: ${{ env.AGE_PUBLIC_KEY != '' && env.GH_PAT != '' }}
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          REPO: ${{ github.repository }}
         run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if [ ! -f sent_log.enc ]; then
+            echo "No sent_log.enc to commit; skipping."
+            exit 0
+          fi
 
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout main || git checkout -b main
+          git pull --rebase origin main || true
           git add sent_log.enc
-          git commit -m "chore: update encrypted sent log" || echo "No changes to commit"
+          git commit -m "chore(ci): update encrypted sent log [skip ci]" || { echo "Nothing to commit"; exit 0; }
 
-          # auth using PAT
-          git remote set-url origin https://x-access-token:${GH_PAT}@github.com/${{ github.repository }}.git
-          # push to same branch this workflow ran on
-          default_branch="${GITHUB_REF_NAME:-main}"
-          git push origin "HEAD:${default_branch}"
-
-      - name: Done
-        run: echo "Mailer workflow completed."
+          if [ -z "$GH_PAT" ]; then
+            echo "GH_PAT secret not set; cannot push."
+            exit 1
+          fi
+          git push "https://x-access-token:${GH_PAT}@github.com/${REPO}.git" HEAD:main
