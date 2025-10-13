@@ -1,0 +1,46 @@
+{
+  "emails": {
+    "architapalkar15@gmail.com": {
+      "full_name": "Archita Palkar",
+      "company": "Amazon",
+      "subject": "Exploring Data Roles at Amazon",
+      "sent_at": "2025-10-13T14:47:51+00:00"
+    },
+    "aniketpatole6@gmail.com": {
+      "full_name": "Aniket Patole",
+      "company": "Humanitarians AI",
+      "subject": "Exploring Data Roles at Humanitarians AI",
+      "sent_at": "2025-10-13T16:06:38+00:00"
+    },
+    "patole.an@northeastern.edu": {
+      "full_name": "Aniket patole",
+      "company": "Northeastern University",
+      "subject": "Exploring Data Roles at Northeastern University",
+      "sent_at": "2025-10-13T16:06:53+00:00"
+    },
+    "nickyslavich@google.com": {
+      "full_name": "Nicky Slavich",
+      "company": "Google",
+      "subject": "Exploring Data Roles at Google",
+      "sent_at": "2025-10-13T16:48:58+00:00"
+    },
+    "bonnie.dilber@zapier.com": {
+      "full_name": "Bonnie Dilber",
+      "company": "Zapier",
+      "subject": "Exploring Data Roles at Zapier",
+      "sent_at": "2025-10-13T16:49:12+00:00"
+    },
+    "katehenr@amazon.com": {
+      "full_name": "Kate Henry",
+      "company": "Amazon",
+      "subject": "Exploring Data Roles at Amazon",
+      "sent_at": "2025-10-13T16:52:02+00:00"
+    },
+    "milleros@amazon.com": {
+      "full_name": "Amy Miller",
+      "company": "Amazon",
+      "subject": "Exploring Data Analyst Opportunities at Amazon",
+      "sent_at": "2025-10-13T16:53:13+00:00"
+    }
+  }
+}
