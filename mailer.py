@@ -105,13 +105,6 @@ def fetch_sheet_df(url: str) -> pd.DataFrame:
     df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
     return df
 
-def load_sent_log() -> dict:
-    if SENT_LOG_PATH.exists():
-        return json.loads(SENT_LOG_PATH.read_text(encoding="utf-8"))
-    return {"emails": {}}
-
-def save_sent_log(log: dict):
-    SENT_LOG_PATH.write_text(json.dumps(log, indent=2), encoding="utf-8")
 
 def strip_markdown_fences(text: str) -> str:
     """Remove ```json ... ``` or ``` ... ``` fences if present."""
@@ -120,6 +113,36 @@ def strip_markdown_fences(text: str) -> str:
         text = re.sub(r"\s*```$", "", text.strip())
     return text.strip()
 
+
+# --- Encrypted sent_log using Fernet ---
+import base64
+from cryptography.fernet import Fernet
+
+SENT_LOG_KEY = os.getenv("SENT_LOG_KEY", "").encode()  # 32-byte urlsafe base64 key
+SENT_LOG_ENC_PATH = Path("sent_log.enc")
+
+def _get_fernet():
+    if not SENT_LOG_KEY:
+        raise SystemExit("Missing SENT_LOG_KEY in env (use a 32-byte urlsafe base64 key from Fernet.generate_key())")
+    return Fernet(SENT_LOG_KEY)
+
+def load_sent_log():
+    """Load encrypted sent_log if present; otherwise return empty structure."""
+    if not SENT_LOG_ENC_PATH.exists():
+        return {"emails": {}}
+    f = _get_fernet()
+    data = SENT_LOG_ENC_PATH.read_bytes()
+    try:
+        decrypted = f.decrypt(data)
+        return json.loads(decrypted.decode("utf-8"))
+    except Exception:
+        # if anything goes wrong, start fresh rather than crash
+        return {"emails": {}}
+
+def save_sent_log(log: dict):
+    f = _get_fernet()
+    blob = f.encrypt(json.dumps(log, indent=2).encode("utf-8"))
+    SENT_LOG_ENC_PATH.write_bytes(blob)
 
 
 def fallback_template(full_name: str, company: str) -> tuple[str, str]:

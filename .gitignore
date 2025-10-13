@@ -1,0 +1,4 @@
+.env
+sent_log.json
+__pycache__/
+*.pyc
